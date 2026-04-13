@@ -11,11 +11,11 @@ const URLS = [
 // 🎯 Sectores
 const SECTORS = ['Campo', 'Cabecera Sur', 'Cabecera Norte'];
 
-// 🔐 Variables desde Railway
+// 🔐 Variables
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
-// 🧠 memoria de alertas enviadas
+// 🧠 memoria de notificados
 let yaNotificados = new Set();
 
 async function sendTelegram(message) {
@@ -53,7 +53,7 @@ async function sendTelegram(message) {
 
   console.log('🤖 Bot corriendo...');
 
-  // 👋 mensaje al iniciar
+  // 👋 mensaje inicial
   await sendTelegram("👋 Hola! Soy el bot de BTS y ya estoy activo 🚨");
 
   while (true) {
@@ -69,15 +69,23 @@ async function sendTelegram(message) {
 
           for (const el of elements) {
             const parent = await el.locator('xpath=..').innerText();
+            const text = parent.toLowerCase();
 
             const isAvailable =
-              !parent.toLowerCase().includes('agotado') &&
-              !parent.toLowerCase().includes('sold out') &&
-              !parent.toLowerCase().includes('no disponible');
+              !text.includes('agotado') &&
+              !text.includes('sold out') &&
+              !text.includes('no disponible');
+
+            // 🚫 excluir cosas no deseadas
+            const isValidSector =
+              !text.includes('soundcheck') &&
+              !text.includes('vip') &&
+              !text.includes('hospitality') &&
+              !text.includes('package');
 
             const key = `${entry.fecha}-${sector}`;
 
-            if (isAvailable && !vistos.has(key) && !yaNotificados.has(key)) {
+            if (isAvailable && isValidSector && !vistos.has(key) && !yaNotificados.has(key)) {
               encontrados.push({
                 fecha: entry.fecha,
                 sector: sector,
@@ -103,14 +111,12 @@ async function sendTelegram(message) {
       let mensaje = `🚨 BTS DISPONIBLE 🚨\n\n`;
 
       for (const item of encontrados) {
-        mensaje += `🎟️ ${item.sector}\n`;
-        mensaje += `📅 ${item.fecha}\n`;
-        mensaje += `👉 ${item.url}\n\n`;
+        mensaje += `🎟️ Sector: ${item.sector}\n`;
+        mensaje += `📅 Fecha: ${item.fecha}\n`;
+        mensaje += `🔗 Comprar: ${item.url}\n\n`;
       }
 
       await sendTelegram(mensaje);
-      console.log("TOKEN:", TELEGRAM_TOKEN);
-      console.log("CHAT_ID:", CHAT_ID);
 
       console.log('🚨 ALERTA ENVIADA');
 
@@ -119,6 +125,6 @@ async function sendTelegram(message) {
       console.log('⏳ Sin disponibilidad...');
     }
 
-    await new Promise(r => setTimeout(r, 30000)); // check cada 30s
+    await new Promise(r => setTimeout(r, 30000)); // cada 30s
   }
 })();
