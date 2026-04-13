@@ -15,19 +15,25 @@ const SECTORS = ['Campo', 'Cabecera Sur', 'Cabecera Norte'];
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
+// 🧠 memoria de alertas enviadas
+let yaNotificados = new Set();
+
 async function sendTelegram(message) {
   try {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
 
-    await fetch(url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         chat_id: CHAT_ID,
-        text: message,
-        parse_mode: 'Markdown'
+        text: message
       })
     });
+
+    const data = await res.json();
+    console.log("Telegram response:", data);
+
   } catch (err) {
     console.log('⚠️ Error enviando a Telegram');
   }
@@ -35,12 +41,20 @@ async function sendTelegram(message) {
 
 (async () => {
   const browser = await chromium.launch({
-  headless: true,
-  args: ['--no-sandbox', '--disable-setuid-sandbox']
-});
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage'
+    ]
+  });
+
   const page = await browser.newPage();
 
   console.log('🤖 Bot corriendo...');
+
+  // 👋 mensaje al iniciar
+  await sendTelegram("👋 Hola! Soy el bot de BTS y ya estoy activo 🚨");
 
   while (true) {
     let encontrados = [];
@@ -63,13 +77,15 @@ async function sendTelegram(message) {
 
             const key = `${entry.fecha}-${sector}`;
 
-            if (isAvailable && !vistos.has(key)) {
+            if (isAvailable && !vistos.has(key) && !yaNotificados.has(key)) {
               encontrados.push({
                 fecha: entry.fecha,
                 sector: sector,
                 url: entry.url
               });
+
               vistos.add(key);
+              yaNotificados.add(key);
             }
           }
         }
@@ -84,23 +100,23 @@ async function sendTelegram(message) {
 
       encontrados.sort((a, b) => prioridad[a.sector] - prioridad[b.sector]);
 
-      let mensaje = `🚨 *BTS DISPONIBLE*\n\n`;
+      let mensaje = `🚨 BTS DISPONIBLE 🚨\n\n`;
 
       for (const item of encontrados) {
-        mensaje += `🎟️ *${item.sector}*\n`;
+        mensaje += `🎟️ ${item.sector}\n`;
         mensaje += `📅 ${item.fecha}\n`;
-        mensaje += `👉 [Comprar](${item.url})\n\n`;
+        mensaje += `👉 ${item.url}\n\n`;
       }
 
       await sendTelegram(mensaje);
 
       console.log('🚨 ALERTA ENVIADA');
 
-      await new Promise(r => setTimeout(r, 180000));
+      await new Promise(r => setTimeout(r, 180000)); // cooldown 3 min
     } else {
       console.log('⏳ Sin disponibilidad...');
     }
 
-    await new Promise(r => setTimeout(r, 30000));
+    await new Promise(r => setTimeout(r, 30000)); // check cada 30s
   }
 })();
