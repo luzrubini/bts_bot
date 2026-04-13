@@ -15,7 +15,7 @@ const SECTORS = ['Campo', 'Cabecera Sur', 'Cabecera Norte'];
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
-// 🧠 memoria de notificados
+// 🧠 memoria
 let yaNotificados = new Set();
 
 async function sendTelegram(message) {
@@ -45,11 +45,17 @@ async function sendTelegram(message) {
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage'
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled'
     ]
   });
 
-  const page = await browser.newPage();
+  let page = await browser.newPage();
+
+  // 🧠 headers más humanos
+  await page.setExtraHTTPHeaders({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36'
+  });
 
   console.log('🤖 Bot corriendo...');
 
@@ -60,71 +66,95 @@ async function sendTelegram(message) {
     let encontrados = [];
     let vistos = new Set();
 
-    for (const entry of URLS) {
-      try {
-        await page.goto(entry.url, { waitUntil: 'networkidle' });
+    try {
+      // 🔄 recrear página cada loop (evita crashes)
+      await page.close();
+      page = await browser.newPage();
 
-        for (const sector of SECTORS) {
-          const elements = await page.locator(`text=${sector}`).all();
+      await page.setExtraHTTPHeaders({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36'
+      });
 
-          for (const el of elements) {
-            const parent = await el.locator('xpath=..').innerText();
-            const text = parent.toLowerCase();
+      for (const entry of URLS) {
+        try {
+          await page.goto(entry.url, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+          });
 
-            const isAvailable =
-              !text.includes('agotado') &&
-              !text.includes('sold out') &&
-              !text.includes('no disponible');
+          // ⏳ esperar JS dinámico
+          await page.waitForTimeout(3000);
 
-            // 🚫 excluir cosas no deseadas
-            const isValidSector =
-              !text.includes('soundcheck') &&
-              !text.includes('vip') &&
-              !text.includes('hospitality') &&
-              !text.includes('package');
+          for (const sector of SECTORS) {
+            const elements = await page.locator(`text=${sector}`).all();
 
-            const key = `${entry.fecha}-${sector}`;
+            for (const el of elements) {
+              const parent = await el.locator('xpath=..').innerText();
+              const text = parent.toLowerCase();
 
-            if (isAvailable && isValidSector && !vistos.has(key) && !yaNotificados.has(key)) {
-              encontrados.push({
-                fecha: entry.fecha,
-                sector: sector,
-                url: entry.url
-              });
+              const isSoldOut =
+                text.includes('agotado') ||
+                text.includes('sold out') ||
+                text.includes('no disponible');
 
-              vistos.add(key);
-              yaNotificados.add(key);
+              // 🚫 excluir cosas que no querés
+              const isValidSector =
+                !text.includes('soundcheck') &&
+                !text.includes('vip') &&
+                !text.includes('hospitality') &&
+                !text.includes('package');
+
+              // 🚫 evitar falsos positivos tipo "campo agotado"
+              if (text.includes(sector.toLowerCase()) && isSoldOut) continue;
+
+              const key = `${entry.fecha}-${sector}`;
+
+              if (!isSoldOut && isValidSector && !vistos.has(key) && !yaNotificados.has(key)) {
+                encontrados.push({
+                  fecha: entry.fecha,
+                  sector: sector,
+                  url: entry.url
+                });
+
+                vistos.add(key);
+                yaNotificados.add(key);
+              }
             }
           }
+
+        } catch (err) {
+          console.log(`⚠️ Error en ${entry.fecha}`);
+        }
+      }
+
+      if (encontrados.length > 0) {
+        const prioridad = { 'Campo': 1, 'Cabecera Sur': 2, 'Cabecera Norte': 3 };
+
+        encontrados.sort((a, b) => prioridad[a.sector] - prioridad[b.sector]);
+
+        let mensaje = `🚨 BTS DISPONIBLE 🚨\n\n`;
+
+        for (const item of encontrados) {
+          mensaje += `🎟️ Sector: ${item.sector}\n`;
+          mensaje += `📅 Fecha: ${item.fecha}\n`;
+          mensaje += `🔗 Comprar: ${item.url}\n\n`;
         }
 
-      } catch (err) {
-        console.log(`⚠️ Error en ${entry.fecha}`);
-      }
-    }
+        await sendTelegram(mensaje);
 
-    if (encontrados.length > 0) {
-      const prioridad = { 'Campo': 1, 'Cabecera Sur': 2, 'Cabecera Norte': 3 };
+        console.log('🚨 ALERTA ENVIADA');
 
-      encontrados.sort((a, b) => prioridad[a.sector] - prioridad[b.sector]);
-
-      let mensaje = `🚨 BTS DISPONIBLE 🚨\n\n`;
-
-      for (const item of encontrados) {
-        mensaje += `🎟️ Sector: ${item.sector}\n`;
-        mensaje += `📅 Fecha: ${item.fecha}\n`;
-        mensaje += `🔗 Comprar: ${item.url}\n\n`;
+        // 💤 cooldown para no spamear
+        await new Promise(r => setTimeout(r, 180000));
+      } else {
+        console.log('⏳ Sin disponibilidad...');
       }
 
-      await sendTelegram(mensaje);
-
-      console.log('🚨 ALERTA ENVIADA');
-
-      await new Promise(r => setTimeout(r, 180000)); // cooldown 3 min
-    } else {
-      console.log('⏳ Sin disponibilidad...');
+    } catch (err) {
+      console.log('🔥 Error general, reiniciando loop...');
     }
 
-    await new Promise(r => setTimeout(r, 30000)); // cada 30s
+    // ⏱️ cada 10 segundos
+    await new Promise(r => setTimeout(r, 10000));
   }
 })();
