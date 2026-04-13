@@ -109,6 +109,8 @@ async function sendTelegram(message) {
       }
 
       await sendTelegram(mensaje);
+      console.log("TOKEN:", TELEGRAM_TOKEN);
+      console.log("CHAT_ID:", CHAT_ID);
 
       console.log('🚨 ALERTA ENVIADA');
 
